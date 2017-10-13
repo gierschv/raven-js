@@ -1,4 +1,4 @@
-/*! Raven.js 3.18.1 (2dca364) | github.com/getsentry/raven-js */
+/*! Raven.js 3.18.1 (5cc29ae) | github.com/getsentry/raven-js */
 
 /*
  * Includes TraceKit
@@ -131,15 +131,34 @@
       3: [
         function(_dereq_, module, exports) {
           (function(global) {
-            /*global XDomainRequest:false, __DEV__:false*/
+            /*global XDomainRequest:false */
 
             var TraceKit = _dereq_(6);
             var stringify = _dereq_(7);
             var RavenConfigError = _dereq_(1);
-            var utils = _dereq_(5);
 
-            var isError = utils.isError,
-              isObject = utils.isObject;
+            var utils = _dereq_(5);
+            var isError = utils.isError;
+            var isObject = utils.isObject;
+            var isObject = utils.isObject;
+            var isError = utils.isError;
+            var isUndefined = utils.isUndefined;
+            var isFunction = utils.isFunction;
+            var isString = utils.isString;
+            var isEmptyObject = utils.isEmptyObject;
+            var each = utils.each;
+            var objectMerge = utils.objectMerge;
+            var truncate = utils.truncate;
+            var objectFrozen = utils.objectFrozen;
+            var hasKey = utils.hasKey;
+            var joinRegExp = utils.joinRegExp;
+            var urlencode = utils.urlencode;
+            var uuid4 = utils.uuid4;
+            var htmlTreeAsString = utils.htmlTreeAsString;
+            var isSameException = utils.isSameException;
+            var isSameStacktrace = utils.isSameStacktrace;
+            var parseUrl = utils.parseUrl;
+            var fill = utils.fill;
 
             var wrapConsoleMethod = _dereq_(2).wrapMethod;
 
@@ -197,7 +216,8 @@
                 stackTraceLimit: 50,
                 autoBreadcrumbs: true,
                 instrument: true,
-                sampleRate: 1
+                sampleRate: 1,
+                stringifyErrorMessages: false
               };
               this._ignoreOnError = 0;
               this._isRavenInstalled = false;
@@ -574,6 +594,15 @@
 
                 options = options || {};
 
+                // Convert '[object Object]' error reports into something that can really help.
+                if (
+                  this._globalOptions.stringifyErrorMessages &&
+                  isObject(msg) &&
+                  !isEmptyObject(msg)
+                ) {
+                  msg = 'error object: ' + stringify(msg);
+                }
+
                 var data = objectMerge(
                   {
                     message: msg + '' // Make sure it's actually a string
@@ -581,21 +610,41 @@
                   options
                 );
 
+                var ex;
+                // Generate a "synthetic" stack trace from this point.
+                // NOTE: If you are a Sentry user, and you are seeing this stack frame, it is NOT indicative
+                //       of a bug with Raven.js. Sentry generates synthetic traces either by configuration,
+                //       or if it catches a thrown object without a "stack" property.
+                try {
+                  throw new Error(msg);
+                } catch (ex1) {
+                  ex = ex1;
+                }
+
+                // null exception name so `Error` isn't prefixed to msg
+                ex.name = null;
+                var stack = TraceKit.computeStackTrace(ex);
+
+                // stack[0] is `throw new Error(msg)` call itself, we are interested in the frame that was just before that, stack[1]
+                var initialCall = stack.stack[1];
+
+                var fileurl = (initialCall && initialCall.url) || '';
+
+                if (
+                  !!this._globalOptions.ignoreUrls.test &&
+                  this._globalOptions.ignoreUrls.test(fileurl)
+                ) {
+                  return;
+                }
+
+                if (
+                  !!this._globalOptions.whitelistUrls.test &&
+                  !this._globalOptions.whitelistUrls.test(fileurl)
+                ) {
+                  return;
+                }
+
                 if (this._globalOptions.stacktrace || (options && options.stacktrace)) {
-                  var ex;
-                  // Generate a "synthetic" stack trace from this point.
-                  // NOTE: If you are a Sentry user, and you are seeing this stack frame, it is NOT indicative
-                  //       of a bug with Raven.js. Sentry generates synthetic traces either by configuration,
-                  //       or if it catches a thrown object without a "stack" property.
-                  try {
-                    throw new Error(msg);
-                  } catch (ex1) {
-                    ex = ex1;
-                  }
-
-                  // null exception name so `Error` isn't prefixed to msg
-                  ex.name = null;
-
                   options = objectMerge(
                     {
                       // fingerprint on msg, not stack trace (legacy behavior, could be
@@ -609,7 +658,6 @@
                     options
                   );
 
-                  var stack = TraceKit.computeStackTrace(ex);
                   var frames = this._prepareFrames(stack, options);
                   data.stacktrace = {
                     // Sentry expects frames oldest to newest
@@ -1355,11 +1403,16 @@
 
                         if (typeof fetchInput === 'string') {
                           url = fetchInput;
-                        } else {
+                        } else if (
+                          'Request' in _window &&
+                          fetchInput instanceof _window.Request
+                        ) {
                           url = fetchInput.url;
                           if (fetchInput.method) {
                             method = fetchInput.method;
                           }
+                        } else {
+                          url = '' + fetchInput;
                         }
 
                         if (args[1] && args[1].method) {
@@ -1617,13 +1670,14 @@
                 frames,
                 options
               ) {
-                var testString = (type || '') + ': ' + (message || '');
-
+                var prefixedMessage = (type ? type + ': ' : '') + (message || '');
                 if (
                   !!this._globalOptions.ignoreErrors.test &&
-                  this._globalOptions.ignoreErrors.test(testString)
-                )
+                  (this._globalOptions.ignoreErrors.test(message) ||
+                    this._globalOptions.ignoreErrors.test(prefixedMessage))
+                ) {
                   return;
+                }
 
                 var stacktrace;
 
@@ -1648,13 +1702,16 @@
                 if (
                   !!this._globalOptions.ignoreUrls.test &&
                   this._globalOptions.ignoreUrls.test(fileurl)
-                )
+                ) {
                   return;
+                }
+
                 if (
                   !!this._globalOptions.whitelistUrls.test &&
                   !this._globalOptions.whitelistUrls.test(fileurl)
-                )
+                ) {
                   return;
+                }
 
                 var data = objectMerge(
                   {
@@ -2087,13 +2144,97 @@
               }
             };
 
-            /*------------------------------------------------
- * utils
+            // Deprecations
+            Raven.prototype.setUser = Raven.prototype.setUserContext;
+            Raven.prototype.setReleaseContext = Raven.prototype.setRelease;
+
+            module.exports = Raven;
+          }.call(
+            this,
+            typeof global !== 'undefined'
+              ? global
+              : typeof self !== 'undefined'
+                ? self
+                : typeof window !== 'undefined' ? window : {}
+          ));
+        },
+        {'1': 1, '2': 2, '5': 5, '6': 6, '7': 7}
+      ],
+      4: [
+        function(_dereq_, module, exports) {
+          (function(global) {
+            /**
+ * Enforces a single instance of the Raven client, and the
+ * main entry point for Raven. If you are a consumer of the
+ * Raven library, you SHOULD load this file (vs raven.js).
+ **/
+
+            var RavenConstructor = _dereq_(3);
+
+            // This is to be defensive in environments where window does not exist (see https://github.com/getsentry/raven-js/pull/785)
+            var _window =
+              typeof window !== 'undefined'
+                ? window
+                : typeof global !== 'undefined'
+                  ? global
+                  : typeof self !== 'undefined' ? self : {};
+            var _Raven = _window.Raven;
+
+            var Raven = new RavenConstructor();
+
+            /*
+ * Allow multiple versions of Raven to be installed.
+ * Strip Raven from the global context and returns the instance.
  *
- * conditionally exported for test via Raven.utils
- =================================================
+ * @return {Raven}
  */
-            var objectPrototype = Object.prototype;
+            Raven.noConflict = function() {
+              _window.Raven = _Raven;
+              return Raven;
+            };
+
+            Raven.afterLoad();
+
+            module.exports = Raven;
+          }.call(
+            this,
+            typeof global !== 'undefined'
+              ? global
+              : typeof self !== 'undefined'
+                ? self
+                : typeof window !== 'undefined' ? window : {}
+          ));
+        },
+        {'3': 3}
+      ],
+      5: [
+        function(_dereq_, module, exports) {
+          (function(global) {
+            var _window =
+              typeof window !== 'undefined'
+                ? window
+                : typeof global !== 'undefined'
+                  ? global
+                  : typeof self !== 'undefined' ? self : {};
+
+            function isObject(what) {
+              return typeof what === 'object' && what !== null;
+            }
+
+            // Yanked from https://git.io/vS8DV re-used under CC0
+            // with some tiny modifications
+            function isError(value) {
+              switch ({}.toString.call(value)) {
+                case '[object Error]':
+                  return true;
+                case '[object Exception]':
+                  return true;
+                case '[object DOMException]':
+                  return true;
+                default:
+                  return value instanceof Error;
+              }
+            }
 
             function isUndefined(what) {
               return what === void 0;
@@ -2104,12 +2245,24 @@
             }
 
             function isString(what) {
-              return objectPrototype.toString.call(what) === '[object String]';
+              return Object.prototype.toString.call(what) === '[object String]';
             }
 
             function isEmptyObject(what) {
               for (var _ in what) return false; // eslint-disable-line guard-for-in, no-unused-vars
               return true;
+            }
+
+            function wrappedCallback(callback) {
+              function dataCallback(data, original) {
+                var normalizedData = callback(data) || data;
+                if (original) {
+                  return original(normalizedData) || normalizedData;
+                }
+                return normalizedData;
+              }
+
+              return dataCallback;
             }
 
             function each(obj, callback) {
@@ -2168,7 +2321,7 @@
  * @param {string} key to check
  */
             function hasKey(object, key) {
-              return objectPrototype.hasOwnProperty.call(object, key);
+              return Object.prototype.hasOwnProperty.call(object, key);
             }
 
             function joinRegExp(patterns) {
@@ -2409,80 +2562,29 @@
               }
             }
 
-            if (typeof __DEV__ !== 'undefined' && __DEV__) {
-              Raven.utils = {
-                isUndefined: isUndefined,
-                isFunction: isFunction,
-                isString: isString,
-                isObject: isObject,
-                isEmptyObject: isEmptyObject,
-                isError: isError,
-                each: each,
-                objectMerge: objectMerge,
-                truncate: truncate,
-                hasKey: hasKey,
-                joinRegExp: joinRegExp,
-                urlencode: urlencode,
-                uuid4: uuid4,
-                htmlTreeAsString: htmlTreeAsString,
-                htmlElementAsString: htmlElementAsString,
-                parseUrl: parseUrl,
-                fill: fill
-              };
-            }
-
-            // Deprecations
-            Raven.prototype.setUser = Raven.prototype.setUserContext;
-            Raven.prototype.setReleaseContext = Raven.prototype.setRelease;
-
-            module.exports = Raven;
-          }.call(
-            this,
-            typeof global !== 'undefined'
-              ? global
-              : typeof self !== 'undefined'
-                ? self
-                : typeof window !== 'undefined' ? window : {}
-          ));
-        },
-        {'1': 1, '2': 2, '5': 5, '6': 6, '7': 7}
-      ],
-      4: [
-        function(_dereq_, module, exports) {
-          (function(global) {
-            /**
- * Enforces a single instance of the Raven client, and the
- * main entry point for Raven. If you are a consumer of the
- * Raven library, you SHOULD load this file (vs raven.js).
- **/
-
-            var RavenConstructor = _dereq_(3);
-
-            // This is to be defensive in environments where window does not exist (see https://github.com/getsentry/raven-js/pull/785)
-            var _window =
-              typeof window !== 'undefined'
-                ? window
-                : typeof global !== 'undefined'
-                  ? global
-                  : typeof self !== 'undefined' ? self : {};
-            var _Raven = _window.Raven;
-
-            var Raven = new RavenConstructor();
-
-            /*
- * Allow multiple versions of Raven to be installed.
- * Strip Raven from the global context and returns the instance.
- *
- * @return {Raven}
- */
-            Raven.noConflict = function() {
-              _window.Raven = _Raven;
-              return Raven;
+            module.exports = {
+              isObject: isObject,
+              isError: isError,
+              isUndefined: isUndefined,
+              isFunction: isFunction,
+              isString: isString,
+              isEmptyObject: isEmptyObject,
+              wrappedCallback: wrappedCallback,
+              each: each,
+              objectMerge: objectMerge,
+              truncate: truncate,
+              objectFrozen: objectFrozen,
+              hasKey: hasKey,
+              joinRegExp: joinRegExp,
+              urlencode: urlencode,
+              uuid4: uuid4,
+              htmlTreeAsString: htmlTreeAsString,
+              htmlElementAsString: htmlElementAsString,
+              isSameException: isSameException,
+              isSameStacktrace: isSameStacktrace,
+              parseUrl: parseUrl,
+              fill: fill
             };
-
-            Raven.afterLoad();
-
-            module.exports = Raven;
           }.call(
             this,
             typeof global !== 'undefined'
@@ -2491,47 +2593,6 @@
                 ? self
                 : typeof window !== 'undefined' ? window : {}
           ));
-        },
-        {'3': 3}
-      ],
-      5: [
-        function(_dereq_, module, exports) {
-          function isObject(what) {
-            return typeof what === 'object' && what !== null;
-          }
-
-          // Yanked from https://git.io/vS8DV re-used under CC0
-          // with some tiny modifications
-          function isError(value) {
-            switch ({}.toString.call(value)) {
-              case '[object Error]':
-                return true;
-              case '[object Exception]':
-                return true;
-              case '[object DOMException]':
-                return true;
-              default:
-                return value instanceof Error;
-            }
-          }
-
-          function wrappedCallback(callback) {
-            function dataCallback(data, original) {
-              var normalizedData = callback(data) || data;
-              if (original) {
-                return original(normalizedData) || normalizedData;
-              }
-              return normalizedData;
-            }
-
-            return dataCallback;
-          }
-
-          module.exports = {
-            isObject: isObject,
-            isError: isError,
-            wrappedCallback: wrappedCallback
-          };
         },
         {}
       ],
@@ -2913,7 +2974,7 @@
               function computeStackTraceFromStackProp(ex) {
                 if (typeof ex.stack === 'undefined' || !ex.stack) return;
 
-                var chrome = /^\s*at (.*?) ?\(((?:file|https?|blob|chrome-extension|native|eval|webpack|<anonymous>|\/).*?)(?::(\d+))?(?::(\d+))?\)?\s*$/i,
+                var chrome = /^\s*at (.*?) ?\(((?:file|https?|blob|chrome-extension|native|eval|webpack|<anonymous>|[a-z]:|\/).*?)(?::(\d+))?(?::(\d+))?\)?\s*$/i,
                   gecko = /^\s*(.*?)(?:\((.*?)\))?(?:^|@)((?:file|https?|blob|chrome|webpack|resource|\[native).*?|[^@]*bundle)(?::(\d+))?(?::(\d+))?\s*$/i,
                   winjs = /^\s*at (?:((?:\[object object\])?.+) )?\(?((?:file|ms-appx|https?|webpack|blob):.*?):(\d+)(?::(\d+))?\)?\s*$/i,
                   // Used to additionally parse URL/line/column from eval frames
